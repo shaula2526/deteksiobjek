@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Pendeteksi Objek - Computer Vision</title>
+    <!-- Tailwind CSS untuk Desain -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- TensorFlow.js dan Model COCO-SSD -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white font-sans min-h-screen flex flex-col items-center p-4">
+
+    <!-- Header -->
+    <header class="text-center mb-6">
+        <h1 class="text-3xl font-bold text-cyan-400">Pendeteksi Objek Real-Time</h1>
+        <p class="text-gray-400 text-sm mt-1">Menggunakan Computer Vision & TensorFlow.js (COCO-SSD)</p>
+    </header>
+
+    <!-- Main Content Container -->
+    <div class="w-full max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        <!-- Kolom Kamera & Canvas (2 Kolom) -->
+        <div class="md:col-span-2 bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col items-center relative">
+            <div id="loading" class="absolute inset-0 bg-gray-900 bg-opacity-80 flex flex-col items-center justify-center z-10 rounded-xl">
+                <div class="animate-spin rounded-full h-12 w-12 border-t-4 border-cyan-400 border-solid mb-3"></div>
+                <p class="text-cyan-300 font-medium">Memuat Model AI & Kamera...</p>
+            </div>
+            
+            <!-- Video & Canvas Wrapper -->
+            <div class="relative w-full aspect-video bg-black rounded-lg overflow-hidden flex items-center justify-center">
+                <video id="webcam" autoplay playsinline muted class="absolute w-full h-full object-cover"></video>
+                <canvas id="canvas" class="absolute w-full h-full object-cover"></canvas>
+            </div>
+
+            <!-- Kontrol Tombol -->
+            <div class="mt-4 flex gap-4 w-full">
+                <button id="toggleBtn" onclick="toggleDetection()" class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow">
+                    Mulai Deteksi
+                </button>
+            </div>
+        </div>
+
+        <!-- Kolom Notifikasi / Log Objek (1 Kolom) -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-lg flex flex-col h-[450px] md:h-auto">
+            <h2 class="text-lg font-semibold text-cyan-300 border-b border-gray-700 pb-2 mb-3 flex items-center justify-between">
+                <span>Log Notifikasi Objek</span>
+                <span id="objCount" class="bg-cyan-900 text-cyan-200 text-xs px-2 py-1 rounded-full">0 Objek</span>
+            </h2>
+            
+            <!-- Daftar Notifikasi -->
+            <div id="logContainer" class="flex-1 overflow-y-auto space-y-2 pr-1 text-sm">
+                <p class="text-gray-500 text-center italic mt-10">Belum ada objek terdeteksi...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Script Utama Aplikasi -->
+    <script>
+        let video = document.getElementById('webcam');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        let model = undefined;
+        let isDetecting = false;
+        let lastLoggedTime = {};
+
+        // Inisialisasi Kamera dan Model AI
+        async function init() {
+            try {
+                // 1. Muat Model COCO-SSD
+                model = await cocoSsd.load();
+                console.log("Model AI Berhasil Dimuat!");
+
+                // 2. Aktifkan Kamera Web
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 },
+                    audio: false
+                });
+                video.srcObject = stream;
+
+                video.addEventListener('loadeddata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    document.getElementById('loading').style.display = 'none';
+                });
+            } catch (error) {
+                alert("Gagal mengakses kamera atau memuat model: " + error.message);
+                document.getElementById('loading').innerHTML = `<p class="text-red-400 text-center p-4">Gagal memuat kamera/model. Pastikan izin kamera diaktifkan.</p>`;
+            }
+        }
+
+        // Toggle Proses Deteksi
+        function toggleDetection() {
+            isDetecting = !isDetecting;
+            const btn = document.getElementById('toggleBtn');
+            if (isDetecting) {
+                btn.textContent = "Hentikan Deteksi";
+                btn.classList.replace('bg-cyan-600', 'bg-red-600');
+                btn.classList.replace('hover:bg-cyan-500', 'hover:bg-red-500');
+                detectFrame();
+            } else {
+                btn.textContent = "Mulai Deteksi";
+                btn.classList.replace('bg-red-600', 'bg-cyan-600');
+                btn.classList.replace('hover:bg-red-500', 'hover:bg-cyan-500');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        // Loop Deteksi Frame per Frame
+        async function detectFrame() {
+            if (!isDetecting) return;
+
+            // Lakukan prediksi objek menggunakan model
+            const predictions = await model.detect(video);
+            
+            // Bersihkan canvas sebelumnya
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update jumlah objek
+            document.getElementById('objCount.textContent') = `${predictions.length} Objek`;
+            document.getElementById('objCount').innerText = `${predictions.length} Objek`;
+
+            let detectedClasses = new Set();
+
+            predictions.forEach(prediction => {
+                const [x, y, width, height] = prediction.bbox;
+                const text = `${prediction.class} (${Math.round(prediction.score * 100)}%)`;
+                
+                detectedClasses.add(prediction.class);
+
+                // Gambar Kotak Pembatas (Bounding Box)
+                ctx.strokeStyle = '#06b6d4';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, width, height);
+
+                // Gambar Label Background
+                ctx.fillStyle = '#06b6d4';
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(x, y > 20 ? y - 20 : 0, textWidth + 10, 20);
+
+                // Tulis Teks Label
+                ctx.fillStyle = '#000000';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.fillText(text, x + 5, y > 20 ? y - 5 : 15);
+
+                // Tambahkan ke Log Notifikasi (Debounce per 2 detik per kelas objek)
+                let now = Date.now();
+                if (!lastLoggedTime[prediction.class] || now - lastLoggedTime[prediction.class] > 2000) {
+                    addNotification(prediction.class, Math.round(prediction.score * 100));
+                    lastLoggedTime[prediction.class] = now;
+                }
+            });
+
+            // Lanjutkan loop frame berikutnya
+            requestAnimationFrame(detectFrame);
+        }
+
+        // Fungsi Menambah Notifikasi ke Panel Log
+        function addNotification(className, confidence) {
+            const logContainer = document.getElementById('logContainer');
+            
+            // Hapus placeholder awal jika ada
+            if (logContainer.querySelector('p.italic')) {
+                logContainer.innerHTML = '';
+            }
+
+            const timeString = new Date().toLocaleTimeString();
+            const notificationItem = document.createElement('div');
+            notificationItem.className = "bg-gray-700 p-2.5 rounded-lg border-l-4 border-cyan-400 flex justify-between items-center animate-pulse";
+            
+            notificationItem.innerHTML = `
+                <div>
+                    <span class="font-bold capitalize text-cyan-200">${className}</span> 
+                    <span class="text-xs text-gray-400 block">Akurasi: ${confidence}%</span>
+                </div>
+                <span class="text-xs text-gray-400">${timeString}</span>
+            `;
+
+            logContainer.prepend(notificationItem);
+
+            // Batasi jumlah log maksimal 15 baris agar tidak penuh
+            if (logContainer.children.length > 15) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        // Jalankan inisialisasi saat halaman dimuat
+        window.onload = init;
+    </script>
+</body>
+</html>
